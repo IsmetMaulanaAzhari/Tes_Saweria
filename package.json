@@ -7,11 +7,17 @@
     "start": "node index.js",
     "dev": "node --watch index.js"
   },
-  "keywords": ["discord", "bot", "saweria", "donasi"],
+  "keywords": [
+    "discord",
+    "bot",
+    "saweria",
+    "donasi"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "better-sqlite3": "^12.6.2",
     "discord.js": "^14.25.1",
     "dotenv": "^17.2.4",
     "socket.io-client": "^4.8.3"
