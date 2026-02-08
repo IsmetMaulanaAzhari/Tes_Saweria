@@ -2,6 +2,10 @@ require('dotenv').config();
 const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { io } = require('socket.io-client');
 const Database = require('better-sqlite3');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus, entersState } = require('@discordjs/voice');
+const cron = require('node-cron');
+const path = require('path');
+const fs = require('fs');
 
 // ==================== KONFIGURASI ====================
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
@@ -10,6 +14,10 @@ const SAWERIA_STREAM_KEY = process.env.SAWERIA_STREAM_KEY;
 const SAWERIA_USERNAME = process.env.SAWERIA_USERNAME || 'username_kamu';
 const TOP_DONATOR_ROLE_ID = process.env.TOP_DONATOR_ROLE_ID || null;
 const GUILD_ID = process.env.GUILD_ID || null;
+const VOICE_CHANNEL_ID = process.env.VOICE_CHANNEL_ID || null;
+const SUMMARY_CHANNEL_ID = process.env.SUMMARY_CHANNEL_ID || process.env.DISCORD_CHANNEL_ID;
+const ENABLE_SOUND_ALERT = process.env.ENABLE_SOUND_ALERT === 'true';
+const SOUND_FILE = process.env.SOUND_FILE || 'alert.mp3';
 
 // Milestone thresholds (dalam Rupiah)
 const MILESTONES = [
@@ -80,15 +88,58 @@ const dbHelpers = {
         ORDER BY total DESC
         LIMIT 1
     `),
+    
+    // Daily summary - donasi hari ini
+    getDailyStats: db.prepare(`
+        SELECT 
+            COALESCE(SUM(amount), 0) as total_amount,
+            COUNT(DISTINCT donor_name) as total_donors,
+            COUNT(*) as total_transactions
+        FROM donations
+        WHERE date(timestamp) = date('now')
+    `),
+    
+    getDailyLeaderboard: db.prepare(`
+        SELECT donor_name, SUM(amount) as total
+        FROM donations
+        WHERE date(timestamp) = date('now')
+        GROUP BY donor_name
+        ORDER BY total DESC
+        LIMIT ?
+    `),
+    
+    // Weekly summary - donasi minggu ini
+    getWeeklyStats: db.prepare(`
+        SELECT 
+            COALESCE(SUM(amount), 0) as total_amount,
+            COUNT(DISTINCT donor_name) as total_donors,
+            COUNT(*) as total_transactions
+        FROM donations
+        WHERE timestamp >= datetime('now', '-7 days')
+    `),
+    
+    getWeeklyLeaderboard: db.prepare(`
+        SELECT donor_name, SUM(amount) as total
+        FROM donations
+        WHERE timestamp >= datetime('now', '-7 days')
+        GROUP BY donor_name
+        ORDER BY total DESC
+        LIMIT ?
+    `),
 };
 
 // ==================== DISCORD CLIENT ====================
+// Audio player untuk sound alert
+let audioPlayer = null;
+let voiceConnection = null;
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildVoiceStates,
     ]
 });
 
@@ -165,6 +216,48 @@ const commands = [
         .setName('resetgoal')
         .setDescription('Reset donation goal (Admin only)')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    // New commands
+    new SlashCommandBuilder()
+        .setName('summary')
+        .setDescription('Tampilkan rangkuman donasi')
+        .addStringOption(option =>
+            option.setName('periode')
+                .setDescription('Periode rangkuman')
+                .setRequired(false)
+                .addChoices(
+                    { name: 'Hari ini', value: 'daily' },
+                    { name: 'Minggu ini', value: 'weekly' },
+                    { name: 'Semua waktu', value: 'all' }
+                )
+        ),
+    new SlashCommandBuilder()
+        .setName('joinvc')
+        .setDescription('Bot bergabung ke voice channel (Admin only)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addChannelOption(option =>
+            option.setName('channel')
+                .setDescription('Voice channel untuk sound alert')
+                .setRequired(false)
+        ),
+    new SlashCommandBuilder()
+        .setName('leavevc')
+        .setDescription('Bot keluar dari voice channel (Admin only)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    new SlashCommandBuilder()
+        .setName('autosummary')
+        .setDescription('Atur summary otomatis harian/mingguan (Admin only)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addStringOption(option =>
+            option.setName('mode')
+                .setDescription('Mode summary otomatis')
+                .setRequired(true)
+                .addChoices(
+                    { name: 'Aktifkan Harian (jam 00:00)', value: 'daily' },
+                    { name: 'Aktifkan Mingguan (Senin 00:00)', value: 'weekly' },
+                    { name: 'Aktifkan Keduanya', value: 'both' },
+                    { name: 'Nonaktifkan', value: 'off' }
+                )
+        ),
 ];
 
 // ==================== FUNGSI UTILITAS ====================
@@ -195,6 +288,179 @@ function getMilestone(amount) {
         }
     }
     return null;
+}
+
+// ==================== VOICE & SOUND ALERT ====================
+async function joinVoice(channel) {
+    try {
+        voiceConnection = joinVoiceChannel({
+            channelId: channel.id,
+            guildId: channel.guild.id,
+            adapterCreator: channel.guild.voiceAdapterCreator,
+        });
+        
+        audioPlayer = createAudioPlayer();
+        voiceConnection.subscribe(audioPlayer);
+        
+        await entersState(voiceConnection, VoiceConnectionStatus.Ready, 30_000);
+        console.log(`🔊 Bot bergabung ke voice channel: ${channel.name}`);
+        return true;
+    } catch (error) {
+        console.error('❌ Error joining voice channel:', error);
+        return false;
+    }
+}
+
+function leaveVoice() {
+    if (voiceConnection) {
+        voiceConnection.destroy();
+        voiceConnection = null;
+        audioPlayer = null;
+        console.log('🔇 Bot keluar dari voice channel');
+        return true;
+    }
+    return false;
+}
+
+async function playSoundAlert() {
+    if (!audioPlayer || !voiceConnection) return;
+    
+    const soundPath = path.join(__dirname, SOUND_FILE);
+    if (!fs.existsSync(soundPath)) {
+        console.warn(`⚠️ File suara tidak ditemukan: ${soundPath}`);
+        return;
+    }
+    
+    try {
+        const resource = createAudioResource(soundPath);
+        audioPlayer.play(resource);
+        console.log('🔔 Sound alert dimainkan');
+    } catch (error) {
+        console.error('❌ Error playing sound:', error);
+    }
+}
+
+// ==================== SUMMARY FUNCTIONS ====================
+async function sendDailySummary() {
+    try {
+        const channel = await client.channels.fetch(SUMMARY_CHANNEL_ID);
+        if (!channel) return;
+        
+        const stats = dbHelpers.getDailyStats.get();
+        const topDonors = dbHelpers.getDailyLeaderboard.all(5);
+        
+        if (stats.total_transactions === 0) {
+            const embed = new EmbedBuilder()
+                .setColor(0x808080)
+                .setTitle('📊 Rangkuman Harian')
+                .setDescription('Tidak ada donasi hari ini.')
+                .setTimestamp();
+            await channel.send({ embeds: [embed] });
+            return;
+        }
+        
+        const leaderboardText = topDonors
+            .map((d, i) => `${i + 1}. **${d.donor_name}** - ${formatRupiah(d.total)}`)
+            .join('\n');
+        
+        const embed = new EmbedBuilder()
+            .setColor(0x00D26A)
+            .setTitle('📊 Rangkuman Donasi Harian')
+            .setDescription(`Ringkasan donasi hari ini (${new Date().toLocaleDateString('id-ID')})`)
+            .addFields(
+                { name: '💰 Total Terkumpul', value: formatRupiah(stats.total_amount), inline: true },
+                { name: '👥 Jumlah Donatur', value: stats.total_donors.toString(), inline: true },
+                { name: '📊 Total Transaksi', value: stats.total_transactions.toString(), inline: true },
+                { name: '🏆 Top Donatur Hari Ini', value: leaderboardText || 'Tidak ada data' },
+            )
+            .setFooter({ text: 'Summary otomatis' })
+            .setTimestamp();
+        
+        await channel.send({ embeds: [embed] });
+        console.log('📊 Daily summary terkirim');
+    } catch (error) {
+        console.error('❌ Error sending daily summary:', error);
+    }
+}
+
+async function sendWeeklySummary() {
+    try {
+        const channel = await client.channels.fetch(SUMMARY_CHANNEL_ID);
+        if (!channel) return;
+        
+        const stats = dbHelpers.getWeeklyStats.get();
+        const topDonors = dbHelpers.getWeeklyLeaderboard.all(10);
+        
+        if (stats.total_transactions === 0) {
+            const embed = new EmbedBuilder()
+                .setColor(0x808080)
+                .setTitle('📊 Rangkuman Mingguan')
+                .setDescription('Tidak ada donasi minggu ini.')
+                .setTimestamp();
+            await channel.send({ embeds: [embed] });
+            return;
+        }
+        
+        const leaderboardText = topDonors
+            .map((d, i) => {
+                const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+                return `${medal} **${d.donor_name}** - ${formatRupiah(d.total)}`;
+            })
+            .join('\n');
+        
+        const embed = new EmbedBuilder()
+            .setColor(0x5865F2)
+            .setTitle('📊 Rangkuman Donasi Mingguan')
+            .setDescription('Ringkasan donasi 7 hari terakhir')
+            .addFields(
+                { name: '💰 Total Terkumpul', value: formatRupiah(stats.total_amount), inline: true },
+                { name: '👥 Jumlah Donatur', value: stats.total_donors.toString(), inline: true },
+                { name: '📊 Total Transaksi', value: stats.total_transactions.toString(), inline: true },
+                { name: '🏆 Top 10 Donatur Minggu Ini', value: leaderboardText || 'Tidak ada data' },
+            )
+            .setFooter({ text: 'Summary otomatis' })
+            .setTimestamp();
+        
+        await channel.send({ embeds: [embed] });
+        console.log('📊 Weekly summary terkirim');
+    } catch (error) {
+        console.error('❌ Error sending weekly summary:', error);
+    }
+}
+
+// Cron jobs storage
+let dailyCronJob = null;
+let weeklyCronJob = null;
+
+function setupAutoSummary(mode) {
+    // Clear existing jobs
+    if (dailyCronJob) {
+        dailyCronJob.stop();
+        dailyCronJob = null;
+    }
+    if (weeklyCronJob) {
+        weeklyCronJob.stop();
+        weeklyCronJob = null;
+    }
+    
+    if (mode === 'daily' || mode === 'both') {
+        // Setiap hari jam 00:00
+        dailyCronJob = cron.schedule('0 0 * * *', sendDailySummary, {
+            timezone: 'Asia/Jakarta'
+        });
+        console.log('⏰ Daily summary aktif (00:00 WIB)');
+    }
+    
+    if (mode === 'weekly' || mode === 'both') {
+        // Setiap Senin jam 00:00
+        weeklyCronJob = cron.schedule('0 0 * * 1', sendWeeklySummary, {
+            timezone: 'Asia/Jakarta'
+        });
+        console.log('⏰ Weekly summary aktif (Senin 00:00 WIB)');
+    }
+    
+    // Save setting
+    dbHelpers.setSetting.run('auto_summary', mode);
 }
 
 // ==================== ROLE REWARDS ====================
@@ -274,6 +540,7 @@ async function handleDonation(data, isTest = false) {
             donorName: data.donator || 'Anonim',
             amount: data.amount || 0,
             message: data.message || '',
+            media: data.media || null, // URL media/GIF
             timestamp: new Date(),
         };
 
@@ -308,11 +575,22 @@ async function handleDonation(data, isTest = false) {
             embed.addFields({ name: '💬 Pesan', value: donation.message });
         }
 
+        // Tambahkan media/GIF jika ada
+        if (donation.media && donation.media.src) {
+            embed.setImage(donation.media.src);
+            embed.addFields({ name: '🎬 Media', value: `[Lihat Media](${donation.media.src})` });
+        }
+
         // Kirim notifikasi
         const messageContent = milestone && !isTest ? '@everyone' : undefined;
         await channel.send({ content: messageContent, embeds: [embed] });
         
         console.log('✅ Notifikasi donasi terkirim ke Discord');
+
+        // Play sound alert jika aktif
+        if (ENABLE_SOUND_ALERT && voiceConnection && !isTest) {
+            await playSoundAlert();
+        }
 
         // Update goal progress jika ada
         if (!isTest) {
@@ -380,6 +658,25 @@ client.once('ready', async () => {
     // Log database stats
     const stats = dbHelpers.getTotalStats.get();
     console.log(`📊 Database: ${stats.total_transactions} transaksi dari ${stats.total_donors} donatur`);
+    
+    // Load saved auto summary setting
+    const savedSummary = dbHelpers.getSetting.get('auto_summary');
+    if (savedSummary && savedSummary.value && savedSummary.value !== 'off') {
+        setupAutoSummary(savedSummary.value);
+        console.log(`⏰ Auto summary dimuat: ${savedSummary.value}`);
+    }
+    
+    // Auto join voice channel if configured
+    if (VOICE_CHANNEL_ID && ENABLE_SOUND_ALERT) {
+        try {
+            const voiceChannel = await client.channels.fetch(VOICE_CHANNEL_ID);
+            if (voiceChannel) {
+                await joinVoice(voiceChannel);
+            }
+        } catch (error) {
+            console.error('⚠️ Gagal auto-join voice channel:', error.message);
+        }
+    }
 });
 
 client.on('interactionCreate', async (interaction) => {
@@ -601,6 +898,129 @@ client.on('interactionCreate', async (interaction) => {
                     content: '✅ Donation goal telah direset.',
                     ephemeral: true
                 });
+                break;
+            }
+
+            // ==================== NEW COMMANDS ====================
+            case 'summary': {
+                const periode = interaction.options.getString('periode') || 'daily';
+                let stats, topDonors, title, description;
+
+                if (periode === 'daily') {
+                    stats = dbHelpers.getDailyStats.get();
+                    topDonors = dbHelpers.getDailyLeaderboard.all(5);
+                    title = '📊 Rangkuman Donasi Hari Ini';
+                    description = `Ringkasan donasi ${new Date().toLocaleDateString('id-ID')}`;
+                } else if (periode === 'weekly') {
+                    stats = dbHelpers.getWeeklyStats.get();
+                    topDonors = dbHelpers.getWeeklyLeaderboard.all(10);
+                    title = '📊 Rangkuman Donasi Minggu Ini';
+                    description = 'Ringkasan donasi 7 hari terakhir';
+                } else {
+                    stats = dbHelpers.getTotalStats.get();
+                    topDonors = dbHelpers.getLeaderboard.all(10);
+                    title = '📊 Rangkuman Donasi Semua Waktu';
+                    description = 'Ringkasan total semua donasi';
+                }
+
+                if (stats.total_transactions === 0) {
+                    await interaction.reply({
+                        content: '📋 Tidak ada donasi untuk periode ini.',
+                        ephemeral: true
+                    });
+                    return;
+                }
+
+                const leaderboardText = topDonors
+                    .map((d, i) => {
+                        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+                        return `${medal} **${d.donor_name}** - ${formatRupiah(d.total)}`;
+                    })
+                    .join('\n');
+
+                const embed = new EmbedBuilder()
+                    .setColor(0x00D26A)
+                    .setTitle(title)
+                    .setDescription(description)
+                    .addFields(
+                        { name: '💰 Total Terkumpul', value: formatRupiah(stats.total_amount), inline: true },
+                        { name: '👥 Jumlah Donatur', value: stats.total_donors.toString(), inline: true },
+                        { name: '📊 Total Transaksi', value: stats.total_transactions.toString(), inline: true },
+                        { name: '🏆 Top Donatur', value: leaderboardText || 'Tidak ada data' },
+                    )
+                    .setTimestamp();
+
+                await interaction.reply({ embeds: [embed] });
+                break;
+            }
+
+            case 'joinvc': {
+                const channelOption = interaction.options.getChannel('channel');
+                let voiceChannel = channelOption;
+
+                // Jika tidak ada channel dipilih, coba ambil dari voice channel user
+                if (!voiceChannel && interaction.member.voice.channel) {
+                    voiceChannel = interaction.member.voice.channel;
+                }
+
+                // Atau gunakan VOICE_CHANNEL_ID dari .env
+                if (!voiceChannel && VOICE_CHANNEL_ID) {
+                    voiceChannel = await client.channels.fetch(VOICE_CHANNEL_ID);
+                }
+
+                if (!voiceChannel || voiceChannel.type !== 2) { // 2 = GuildVoice
+                    await interaction.reply({
+                        content: '❌ Silakan pilih voice channel atau bergabung ke voice channel terlebih dahulu.',
+                        ephemeral: true
+                    });
+                    return;
+                }
+
+                const success = await joinVoice(voiceChannel);
+                if (success) {
+                    await interaction.reply({
+                        content: `✅ Bot bergabung ke voice channel **${voiceChannel.name}**. Sound alert akan aktif!`,
+                        ephemeral: true
+                    });
+                } else {
+                    await interaction.reply({
+                        content: '❌ Gagal bergabung ke voice channel.',
+                        ephemeral: true
+                    });
+                }
+                break;
+            }
+
+            case 'leavevc': {
+                const left = leaveVoice();
+                await interaction.reply({
+                    content: left ? '✅ Bot telah keluar dari voice channel.' : '❌ Bot tidak sedang di voice channel.',
+                    ephemeral: true
+                });
+                break;
+            }
+
+            case 'autosummary': {
+                const mode = interaction.options.getString('mode');
+                
+                if (mode === 'off') {
+                    setupAutoSummary('off');
+                    await interaction.reply({
+                        content: '✅ Auto summary telah dinonaktifkan.',
+                        ephemeral: true
+                    });
+                } else {
+                    setupAutoSummary(mode);
+                    let modeText = '';
+                    if (mode === 'daily') modeText = 'Harian (setiap hari jam 00:00 WIB)';
+                    if (mode === 'weekly') modeText = 'Mingguan (setiap Senin jam 00:00 WIB)';
+                    if (mode === 'both') modeText = 'Harian & Mingguan';
+                    
+                    await interaction.reply({
+                        content: `✅ Auto summary aktif: **${modeText}**\nSummary akan dikirim ke channel <#${SUMMARY_CHANNEL_ID}>`,
+                        ephemeral: true
+                    });
+                }
                 break;
             }
         }
