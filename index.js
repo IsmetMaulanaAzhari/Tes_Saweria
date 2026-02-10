@@ -27,6 +27,13 @@ const MILESTONES = [
     { amount: 50000, emoji: '🔥', title: 'DONASI SPESIAL!' },
 ];
 
+// Default blacklist words (bisa ditambah via command)
+const DEFAULT_BLACKLIST = [
+    'anjing', 'bangsat', 'babi', 'kontol', 'memek', 'ngentot', 
+    'tolol', 'goblok', 'idiot', 'bajingan', 'keparat', 'brengsek',
+    'tai', 'asu', 'jancok', 'cuk', 'jembut'
+];
+
 // ==================== DATABASE SQLITE ====================
 const db = new Database('donations.db');
 
@@ -43,6 +50,12 @@ db.exec(`
     CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
         value TEXT
+    );
+    
+    CREATE TABLE IF NOT EXISTS blacklist (
+        word TEXT PRIMARY KEY,
+        added_by TEXT,
+        added_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     
     CREATE INDEX IF NOT EXISTS idx_donor_name ON donations(donor_name);
@@ -126,7 +139,81 @@ const dbHelpers = {
         ORDER BY total DESC
         LIMIT ?
     `),
+    
+    // Blacklist words
+    addBlacklistWord: db.prepare(`INSERT OR IGNORE INTO blacklist (word, added_by) VALUES (?, ?)`),
+    removeBlacklistWord: db.prepare(`DELETE FROM blacklist WHERE word = ?`),
+    getBlacklistWords: db.prepare(`SELECT word FROM blacklist`),
+    isWordBlacklisted: db.prepare(`SELECT 1 FROM blacklist WHERE word = ?`),
 };
+
+// ==================== BLACKLIST FUNCTIONS ====================
+// Load blacklist words into memory for faster checking
+let blacklistWords = new Set(DEFAULT_BLACKLIST);
+
+function loadBlacklistFromDB() {
+    const words = dbHelpers.getBlacklistWords.all();
+    words.forEach(w => blacklistWords.add(w.word.toLowerCase()));
+    console.log(`📝 Loaded ${blacklistWords.size} blacklist words`);
+}
+
+function addToBlacklist(word, addedBy = 'system') {
+    const lowerWord = word.toLowerCase().trim();
+    if (lowerWord.length < 2) return false;
+    
+    dbHelpers.addBlacklistWord.run(lowerWord, addedBy);
+    blacklistWords.add(lowerWord);
+    return true;
+}
+
+function removeFromBlacklist(word) {
+    const lowerWord = word.toLowerCase().trim();
+    dbHelpers.removeBlacklistWord.run(lowerWord);
+    blacklistWords.delete(lowerWord);
+    return true;
+}
+
+function censorMessage(message) {
+    if (!message) return message;
+    
+    let censoredMessage = message;
+    const words = message.toLowerCase().split(/\s+/);
+    
+    for (const word of words) {
+        // Clean word dari punctuation untuk pengecekan
+        const cleanWord = word.replace(/[^a-zA-Z0-9]/g, '');
+        
+        if (blacklistWords.has(cleanWord)) {
+            // Buat regex untuk replace dengan case-insensitive
+            const regex = new RegExp(cleanWord, 'gi');
+            const censor = '*'.repeat(cleanWord.length);
+            censoredMessage = censoredMessage.replace(regex, censor);
+        }
+    }
+    
+    // Check juga partial match untuk kata yang digabung
+    for (const blockedWord of blacklistWords) {
+        if (blockedWord.length >= 3 && censoredMessage.toLowerCase().includes(blockedWord)) {
+            const regex = new RegExp(blockedWord, 'gi');
+            const censor = '*'.repeat(blockedWord.length);
+            censoredMessage = censoredMessage.replace(regex, censor);
+        }
+    }
+    
+    return censoredMessage;
+}
+
+function containsBlacklistedWord(message) {
+    if (!message) return false;
+    const lowerMessage = message.toLowerCase();
+    
+    for (const word of blacklistWords) {
+        if (lowerMessage.includes(word)) {
+            return true;
+        }
+    }
+    return false;
+}
 
 // ==================== DISCORD CLIENT ====================
 // Audio player untuk sound alert
@@ -256,6 +343,46 @@ const commands = [
                     { name: 'Aktifkan Mingguan (Senin 00:00)', value: 'weekly' },
                     { name: 'Aktifkan Keduanya', value: 'both' },
                     { name: 'Nonaktifkan', value: 'off' }
+                )
+        ),
+    // Blacklist commands
+    new SlashCommandBuilder()
+        .setName('blacklist')
+        .setDescription('Kelola kata terlarang (Admin only)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('add')
+                .setDescription('Tambah kata ke blacklist')
+                .addStringOption(option =>
+                    option.setName('kata')
+                        .setDescription('Kata yang ingin diblokir')
+                        .setRequired(true)
+                )
+        )
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('remove')
+                .setDescription('Hapus kata dari blacklist')
+                .addStringOption(option =>
+                    option.setName('kata')
+                        .setDescription('Kata yang ingin dihapus')
+                        .setRequired(true)
+                )
+        )
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('list')
+                .setDescription('Tampilkan daftar kata terlarang')
+        )
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('test')
+                .setDescription('Test filter pada teks')
+                .addStringOption(option =>
+                    option.setName('teks')
+                        .setDescription('Teks untuk ditest')
+                        .setRequired(true)
                 )
         ),
 ];
@@ -570,9 +697,14 @@ async function handleDonation(data, isTest = false) {
             .setFooter({ text: isTest ? '⚠️ INI ADALAH TEST DONASI' : 'Terima kasih atas dukungannya! 💖' })
             .setTimestamp();
 
-        // Tambahkan pesan donatur jika ada
+        // Tambahkan pesan donatur jika ada (dengan filter blacklist)
         if (donation.message) {
-            embed.addFields({ name: '💬 Pesan', value: donation.message });
+            const censoredMessage = censorMessage(donation.message);
+            const wasFiltered = censoredMessage !== donation.message;
+            embed.addFields({ 
+                name: wasFiltered ? '💬 Pesan (difilter)' : '💬 Pesan', 
+                value: censoredMessage 
+            });
         }
 
         // Tambahkan media/GIF jika ada
@@ -651,6 +783,9 @@ client.once('ready', async () => {
     
     // Connect ke Saweria
     connectToSaweria();
+    
+    // Load blacklist words from database
+    loadBlacklistFromDB();
     
     // Set status bot
     client.user.setActivity('donasi | /donasihelp', { type: 3 });
@@ -758,7 +893,8 @@ client.on('interactionCreate', async (interaction) => {
                             '`/resetgoal` - Reset goal\n' +
                             '`/autosummary` - Atur summary otomatis\n' +
                             '`/joinvc` - Bot gabung voice channel\n' +
-                            '`/leavevc` - Bot keluar voice channel'
+                            '`/leavevc` - Bot keluar voice channel\n' +
+                            '`/blacklist` - Kelola kata terlarang'
                         },
                     )
                     .setFooter({ text: 'Saweria Discord Bot' })
@@ -1024,6 +1160,94 @@ client.on('interactionCreate', async (interaction) => {
                         content: `✅ Auto summary aktif: **${modeText}**\nSummary akan dikirim ke channel <#${SUMMARY_CHANNEL_ID}>`,
                         ephemeral: true
                     });
+                }
+                break;
+            }
+
+            case 'blacklist': {
+                const subcommand = interaction.options.getSubcommand();
+                
+                if (subcommand === 'add') {
+                    const kata = interaction.options.getString('kata');
+                    const words = kata.split(/[,\s]+/).filter(w => w.length >= 2);
+                    
+                    if (words.length === 0) {
+                        await interaction.reply({
+                            content: '❌ Kata harus minimal 2 karakter.',
+                            ephemeral: true
+                        });
+                        return;
+                    }
+                    
+                    words.forEach(word => addToBlacklist(word, interaction.user.tag));
+                    
+                    await interaction.reply({
+                        content: `✅ Berhasil menambahkan ${words.length} kata ke blacklist:\n\`${words.join(', ')}\``,
+                        ephemeral: true
+                    });
+                }
+                
+                else if (subcommand === 'remove') {
+                    const kata = interaction.options.getString('kata');
+                    const words = kata.split(/[,\s]+/).filter(w => w.length >= 2);
+                    
+                    words.forEach(word => removeFromBlacklist(word));
+                    
+                    await interaction.reply({
+                        content: `✅ Berhasil menghapus kata dari blacklist:\n\`${words.join(', ')}\``,
+                        ephemeral: true
+                    });
+                }
+                
+                else if (subcommand === 'list') {
+                    const wordArray = Array.from(blacklistWords).sort();
+                    
+                    if (wordArray.length === 0) {
+                        await interaction.reply({
+                            content: '📝 Tidak ada kata dalam blacklist.',
+                            ephemeral: true
+                        });
+                        return;
+                    }
+                    
+                    // Split into chunks if too long
+                    const chunkSize = 50;
+                    const chunks = [];
+                    for (let i = 0; i < wordArray.length; i += chunkSize) {
+                        chunks.push(wordArray.slice(i, i + chunkSize));
+                    }
+                    
+                    const embed = new EmbedBuilder()
+                        .setColor(0xFF0000)
+                        .setTitle('🚫 Daftar Kata Terlarang')
+                        .setDescription(`Total: **${wordArray.length}** kata`)
+                        .addFields(
+                            chunks.slice(0, 5).map((chunk, i) => ({
+                                name: `Kata ${i * chunkSize + 1}-${Math.min((i + 1) * chunkSize, wordArray.length)}`,
+                                value: `\`${chunk.join('`, `')}\``
+                            }))
+                        )
+                        .setFooter({ text: 'Gunakan /blacklist add atau /blacklist remove untuk mengelola' })
+                        .setTimestamp();
+                    
+                    await interaction.reply({ embeds: [embed], ephemeral: true });
+                }
+                
+                else if (subcommand === 'test') {
+                    const teks = interaction.options.getString('teks');
+                    const filtered = censorMessage(teks);
+                    const hasBlacklisted = containsBlacklistedWord(teks);
+                    
+                    const embed = new EmbedBuilder()
+                        .setColor(hasBlacklisted ? 0xFF0000 : 0x00FF00)
+                        .setTitle(hasBlacklisted ? '🚫 Kata Terlarang Terdeteksi' : '✅ Tidak Ada Kata Terlarang')
+                        .addFields(
+                            { name: '📝 Teks Asli', value: `\`\`\`${teks}\`\`\`` },
+                            { name: '🔒 Hasil Filter', value: `\`\`\`${filtered}\`\`\`` }
+                        )
+                        .setTimestamp();
+                    
+                    await interaction.reply({ embeds: [embed], ephemeral: true });
                 }
                 break;
             }
