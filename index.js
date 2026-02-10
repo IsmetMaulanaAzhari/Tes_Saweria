@@ -748,13 +748,17 @@ client.on('interactionCreate', async (interaction) => {
                             '`/leaderboard` - Top donatur\n' +
                             '`/recentdonasi` - Donasi terbaru\n' +
                             '`/totaldonasi` - Statistik donasi\n' +
+                            '`/summary` - Rangkuman donasi\n' +
                             '`/goal` - Progress donation goal\n' +
                             '`/donasi` - Cara berdonasi'
                         },
                         { name: '🔧 Admin Only', value: 
                             '`/testdonasi` - Test notifikasi\n' +
                             '`/setgoal` - Set target donasi\n' +
-                            '`/resetgoal` - Reset goal'
+                            '`/resetgoal` - Reset goal\n' +
+                            '`/autosummary` - Atur summary otomatis\n' +
+                            '`/joinvc` - Bot gabung voice channel\n' +
+                            '`/leavevc` - Bot keluar voice channel'
                         },
                     )
                     .setFooter({ text: 'Saweria Discord Bot' })
@@ -1041,8 +1045,20 @@ process.on('unhandledRejection', (error) => {
 });
 
 process.on('SIGINT', () => {
-    console.log('📴 Menutup database...');
+    console.log('📴 Mematikan bot...');
+    
+    // Leave voice channel
+    if (voiceConnection) {
+        voiceConnection.destroy();
+    }
+    
+    // Stop cron jobs
+    if (dailyCronJob) dailyCronJob.stop();
+    if (weeklyCronJob) weeklyCronJob.stop();
+    
+    // Close database
     db.close();
+    
     process.exit(0);
 });
 
