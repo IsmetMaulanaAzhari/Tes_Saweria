@@ -27,6 +27,10 @@ module.exports = {
     ENABLE_TTS: process.env.ENABLE_TTS === 'true',
     TTS_LANGUAGE: process.env.TTS_LANGUAGE || 'id', // id = Indonesia
     
+    // Minimum Alert Configuration
+    MIN_ALERT_AMOUNT: parseInt(process.env.MIN_ALERT_AMOUNT) || 0, // 0 = semua donasi ditampilkan
+    MIN_TTS_AMOUNT: parseInt(process.env.MIN_TTS_AMOUNT) || 0, // 0 = semua donasi dibacakan TTS
+    
     // Summary Configuration
     SUMMARY_CHANNEL_ID: process.env.SUMMARY_CHANNEL_ID || process.env.DISCORD_CHANNEL_ID,
     

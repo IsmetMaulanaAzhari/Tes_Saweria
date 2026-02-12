@@ -9,9 +9,59 @@ const { formatRupiah, getMilestone } = require('../utils/helpers');
 const { censorMessage } = require('./blacklist');
 const { playSoundAlert, isInVoiceChannel, speakTTS } = require('./voice');
 const { checkGoalProgress } = require('./goals');
-const { DISCORD_CHANNEL_ID, ENABLE_SOUND_ALERT, ENABLE_TTS, TOP_DONATOR_ROLE_ID, GUILD_ID } = require('../config');
+const { DISCORD_CHANNEL_ID, ENABLE_SOUND_ALERT, ENABLE_TTS, TOP_DONATOR_ROLE_ID, GUILD_ID, MIN_ALERT_AMOUNT, MIN_TTS_AMOUNT } = require('../config');
 
 let discordClient = null;
+
+// Dynamic minimum amounts (can be changed via commands)
+let minAlertAmount = MIN_ALERT_AMOUNT;
+let minTTSAmount = MIN_TTS_AMOUNT;
+
+/**
+ * Set minimum alert amount
+ * @param {number} amount - Minimum amount untuk notifikasi
+ */
+function setMinAlertAmount(amount) {
+    minAlertAmount = amount;
+    dbHelpers.setSetting.run('min_alert_amount', amount.toString());
+}
+
+/**
+ * Set minimum TTS amount
+ * @param {number} amount - Minimum amount untuk TTS
+ */
+function setMinTTSAmount(amount) {
+    minTTSAmount = amount;
+    dbHelpers.setSetting.run('min_tts_amount', amount.toString());
+}
+
+/**
+ * Get current minimum amounts
+ * @returns {object} { minAlert, minTTS }
+ */
+function getMinAmounts() {
+    return {
+        minAlert: minAlertAmount,
+        minTTS: minTTSAmount
+    };
+}
+
+/**
+ * Load minimum amounts from database
+ */
+function loadMinAmounts() {
+    const savedMinAlert = dbHelpers.getSetting.get('min_alert_amount');
+    const savedMinTTS = dbHelpers.getSetting.get('min_tts_amount');
+    
+    if (savedMinAlert && savedMinAlert.value) {
+        minAlertAmount = parseInt(savedMinAlert.value) || MIN_ALERT_AMOUNT;
+    }
+    if (savedMinTTS && savedMinTTS.value) {
+        minTTSAmount = parseInt(savedMinTTS.value) || MIN_TTS_AMOUNT;
+    }
+    
+    console.log(`💰 Min Alert: ${formatRupiah(minAlertAmount)}, Min TTS: ${formatRupiah(minTTSAmount)}`);
+}
 
 /**
  * Set Discord client untuk digunakan module ini
@@ -19,6 +69,7 @@ let discordClient = null;
  */
 function setClient(client) {
     discordClient = client;
+    loadMinAmounts(); // Load saved minimum amounts
 }
 
 /**
@@ -88,6 +139,15 @@ async function handleDonation(data, isTest = false) {
             );
         }
 
+        // Check minimum alert amount
+        if (donation.amount < minAlertAmount && !isTest) {
+            console.log(`ℹ️ Donasi ${formatRupiah(donation.amount)} dari ${donation.donorName} di bawah minimum alert (${formatRupiah(minAlertAmount)})`);
+            // Tetap update goal dan role meskipun tidak ada notifikasi
+            await checkGoalProgress(channel, donation.amount);
+            await updateTopDonatorRole();
+            return;
+        }
+
         // Check milestone
         const milestone = getMilestone(donation.amount);
         
@@ -133,8 +193,8 @@ async function handleDonation(data, isTest = false) {
                 await playSoundAlert();
             }
             
-            // TTS: Bacakan pesan donasi
-            if (ENABLE_TTS) {
+            // TTS: Bacakan pesan donasi (cek minimum TTS amount)
+            if (ENABLE_TTS && donation.amount >= minTTSAmount) {
                 // Format pesan untuk TTS
                 const amountText = `${Math.floor(donation.amount / 1000)} ribu rupiah`;
                 let ttsMessage = `${donation.donorName} donasi ${amountText}.`;
@@ -146,6 +206,8 @@ async function handleDonation(data, isTest = false) {
                 }
                 
                 await speakTTS(ttsMessage);
+            } else if (ENABLE_TTS && donation.amount < minTTSAmount) {
+                console.log(`ℹ️ TTS dilewati - donasi di bawah minimum TTS (${formatRupiah(minTTSAmount)})`);
             }
         }
 
@@ -164,4 +226,8 @@ module.exports = {
     setClient,
     handleDonation,
     updateTopDonatorRole,
+    setMinAlertAmount,
+    setMinTTSAmount,
+    getMinAmounts,
+    loadMinAmounts,
 };

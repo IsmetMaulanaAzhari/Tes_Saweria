@@ -176,6 +176,39 @@ const commands = [
                         .setRequired(true)
                 )
         ),
+    
+    // ==================== MINIMUM ALERT COMMANDS ====================
+    new SlashCommandBuilder()
+        .setName('minalert')
+        .setDescription('Atur minimum amount untuk notifikasi (Admin only)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('set')
+                .setDescription('Set minimum amount untuk notifikasi Discord')
+                .addIntegerOption(option =>
+                    option.setName('jumlah')
+                        .setDescription('Minimum jumlah donasi (Rupiah). 0 = tampilkan semua')
+                        .setRequired(true)
+                        .setMinValue(0)
+                )
+        )
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('tts')
+                .setDescription('Set minimum amount untuk TTS')
+                .addIntegerOption(option =>
+                    option.setName('jumlah')
+                        .setDescription('Minimum jumlah donasi untuk TTS (Rupiah). 0 = bacakan semua')
+                        .setRequired(true)
+                        .setMinValue(0)
+                )
+        )
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('status')
+                .setDescription('Lihat setting minimum amount saat ini')
+        ),
 ];
 
 module.exports = commands;

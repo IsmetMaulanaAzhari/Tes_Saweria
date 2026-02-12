@@ -19,7 +19,7 @@ const {
 const { joinVoice, leaveVoice } = require('../modules/voice');
 const { setupAutoSummary, getStatsByPeriod } = require('../modules/summary');
 const { setGoal, getGoalProgress, resetGoal } = require('../modules/goals');
-const { handleDonation } = require('../modules/donation');
+const { handleDonation, setMinAlertAmount, setMinTTSAmount, getMinAmounts } = require('../modules/donation');
 
 /**
  * Handle semua slash command interactions
@@ -87,6 +87,10 @@ async function handleCommand(interaction, client) {
             
             case 'blacklist':
                 await handleBlacklist(interaction);
+                break;
+            
+            case 'minalert':
+                await handleMinAlert(interaction);
                 break;
         }
     } catch (error) {
@@ -173,7 +177,8 @@ async function handleDonasiHelp(interaction) {
                 '`/autosummary` - Atur summary otomatis\n' +
                 '`/joinvc` - Bot gabung voice channel\n' +
                 '`/leavevc` - Bot keluar voice channel\n' +
-                '`/blacklist` - Kelola kata terlarang'
+                '`/blacklist` - Kelola kata terlarang\n' +
+                '`/minalert` - Atur minimum amount alert'
             },
         )
         .setFooter({ text: 'Saweria Discord Bot' })
@@ -485,6 +490,71 @@ async function handleBlacklist(interaction) {
                 { name: '📝 Teks Asli', value: `\`\`\`${teks}\`\`\`` },
                 { name: '🔒 Hasil Filter', value: `\`\`\`${filtered}\`\`\`` }
             )
+            .setTimestamp();
+        
+        await interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+}
+
+async function handleMinAlert(interaction) {
+    const subcommand = interaction.options.getSubcommand();
+    
+    if (subcommand === 'set') {
+        const jumlah = interaction.options.getInteger('jumlah');
+        setMinAlertAmount(jumlah);
+        
+        const embed = new EmbedBuilder()
+            .setColor(0x00D26A)
+            .setTitle('✅ Minimum Alert Amount Diubah')
+            .setDescription(jumlah === 0 
+                ? 'Semua donasi akan ditampilkan di Discord.'
+                : `Hanya donasi **${formatRupiah(jumlah)}** atau lebih yang akan ditampilkan.`)
+            .addFields(
+                { name: '💰 Minimum Amount', value: formatRupiah(jumlah), inline: true }
+            )
+            .setTimestamp();
+        
+        await interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+    
+    else if (subcommand === 'tts') {
+        const jumlah = interaction.options.getInteger('jumlah');
+        setMinTTSAmount(jumlah);
+        
+        const embed = new EmbedBuilder()
+            .setColor(0x00D26A)
+            .setTitle('✅ Minimum TTS Amount Diubah')
+            .setDescription(jumlah === 0 
+                ? 'Semua donasi akan dibacakan TTS.'
+                : `Hanya donasi **${formatRupiah(jumlah)}** atau lebih yang akan dibacakan TTS.`)
+            .addFields(
+                { name: '🗣️ Minimum TTS', value: formatRupiah(jumlah), inline: true }
+            )
+            .setTimestamp();
+        
+        await interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+    
+    else if (subcommand === 'status') {
+        const { minAlert, minTTS } = getMinAmounts();
+        
+        const embed = new EmbedBuilder()
+            .setColor(0x5865F2)
+            .setTitle('⚙️ Status Minimum Amount')
+            .addFields(
+                { 
+                    name: '📢 Min. Alert (Discord)', 
+                    value: minAlert === 0 ? 'Semua donasi' : formatRupiah(minAlert), 
+                    inline: true 
+                },
+                { 
+                    name: '🗣️ Min. TTS (Voice)', 
+                    value: minTTS === 0 ? 'Semua donasi' : formatRupiah(minTTS), 
+                    inline: true 
+                }
+            )
+            .setDescription('Donasi di bawah minimum tetap tercatat di database.')
+            .setFooter({ text: 'Gunakan /minalert set atau /minalert tts untuk mengubah' })
             .setTimestamp();
         
         await interaction.reply({ embeds: [embed], ephemeral: true });

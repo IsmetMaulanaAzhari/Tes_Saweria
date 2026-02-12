@@ -31,7 +31,12 @@ Bot Discord untuk integrasi dengan [Saweria](https://saweria.co) - platform dona
 - Default blacklist + custom words
 - Admin dapat menambah/hapus kata
 
-### 💾 Database
+### � Minimum Amount Alert
+- Set minimum donasi untuk notifikasi Discord
+- Set minimum donasi untuk TTS
+- Donasi di bawah minimum tetap tercatat di database
+
+### �💾 Database
 - SQLite untuk penyimpanan persisten
 - Semua donasi tercatat di database
 
@@ -61,6 +66,9 @@ Bot Discord untuk integrasi dengan [Saweria](https://saweria.co) - platform dona
 | `/blacklist remove <kata>` | Hapus kata dari blacklist |
 | `/blacklist list` | Lihat daftar blacklist |
 | `/blacklist test <teks>` | Test filter blacklist |
+| `/minalert set <jumlah>` | Set minimum amount untuk notifikasi |
+| `/minalert tts <jumlah>` | Set minimum amount untuk TTS |
+| `/minalert status` | Lihat setting minimum amount |
 
 ## 🚀 Instalasi
 
@@ -131,6 +139,10 @@ SOUND_FILE=alert.mp3
 # Text-to-Speech
 ENABLE_TTS=true
 TTS_LANGUAGE=id
+
+# Minimum Amount Alert (0 = tampilkan semua)
+MIN_ALERT_AMOUNT=0
+MIN_TTS_AMOUNT=0
 
 # Channel untuk summary otomatis
 SUMMARY_CHANNEL_ID=your_summary_channel_id
@@ -223,7 +235,24 @@ Bot secara default memfilter kata-kata kasar dalam bahasa Indonesia. Admin dapat
 /blacklist test <teks>    # Test filter
 ```
 
-## 🐛 Troubleshooting
+## � Minimum Amount Alert
+
+Fitur untuk mengatur minimum donasi yang akan ditampilkan/dibacakan:
+
+```
+/minalert set <jumlah>    # Set min. untuk notifikasi Discord
+/minalert tts <jumlah>    # Set min. untuk TTS
+/minalert status          # Lihat setting saat ini
+```
+
+**Contoh penggunaan:**
+- `/minalert set 10000` - Hanya donasi Rp 10.000+ yang muncul di Discord
+- `/minalert tts 50000` - Hanya donasi Rp 50.000+ yang dibacakan TTS
+- `/minalert set 0` - Tampilkan semua donasi
+
+> **Note:** Donasi di bawah minimum tetap tercatat di database dan dihitung dalam leaderboard/statistik.
+
+## �🐛 Troubleshooting
 
 ### Bot tidak bisa login
 - Pastikan `DISCORD_TOKEN` benar
