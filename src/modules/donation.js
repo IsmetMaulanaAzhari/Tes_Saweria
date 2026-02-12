@@ -7,9 +7,9 @@ const { EmbedBuilder } = require('discord.js');
 const { dbHelpers } = require('../database');
 const { formatRupiah, getMilestone } = require('../utils/helpers');
 const { censorMessage } = require('./blacklist');
-const { playSoundAlert, isInVoiceChannel } = require('./voice');
+const { playSoundAlert, isInVoiceChannel, speakTTS } = require('./voice');
 const { checkGoalProgress } = require('./goals');
-const { DISCORD_CHANNEL_ID, ENABLE_SOUND_ALERT, TOP_DONATOR_ROLE_ID, GUILD_ID } = require('../config');
+const { DISCORD_CHANNEL_ID, ENABLE_SOUND_ALERT, ENABLE_TTS, TOP_DONATOR_ROLE_ID, GUILD_ID } = require('../config');
 
 let discordClient = null;
 
@@ -126,9 +126,27 @@ async function handleDonation(data, isTest = false) {
         
         console.log('✅ Notifikasi donasi terkirim ke Discord');
 
-        // Play sound alert jika aktif
-        if (ENABLE_SOUND_ALERT && isInVoiceChannel() && !isTest) {
-            await playSoundAlert();
+        // Voice channel features (hanya jika bukan test)
+        if (isInVoiceChannel() && !isTest) {
+            // Play sound alert jika aktif
+            if (ENABLE_SOUND_ALERT) {
+                await playSoundAlert();
+            }
+            
+            // TTS: Bacakan pesan donasi
+            if (ENABLE_TTS) {
+                // Format pesan untuk TTS
+                const amountText = `${Math.floor(donation.amount / 1000)} ribu rupiah`;
+                let ttsMessage = `${donation.donorName} donasi ${amountText}.`;
+                
+                // Tambahkan pesan donatur jika ada
+                if (donation.message) {
+                    const censoredMsg = censorMessage(donation.message);
+                    ttsMessage += ` Pesan: ${censoredMsg}`;
+                }
+                
+                await speakTTS(ttsMessage);
+            }
         }
 
         // Update goal progress jika ada

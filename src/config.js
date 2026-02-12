@@ -23,6 +23,10 @@ module.exports = {
     ENABLE_SOUND_ALERT: process.env.ENABLE_SOUND_ALERT === 'true',
     SOUND_FILE: process.env.SOUND_FILE || 'alert.mp3',
     
+    // TTS Configuration
+    ENABLE_TTS: process.env.ENABLE_TTS === 'true',
+    TTS_LANGUAGE: process.env.TTS_LANGUAGE || 'id', // id = Indonesia
+    
     // Summary Configuration
     SUMMARY_CHANNEL_ID: process.env.SUMMARY_CHANNEL_ID || process.env.DISCORD_CHANNEL_ID,
     
