@@ -9,6 +9,7 @@ const { formatRupiah, getMilestone } = require('../utils/helpers');
 const { censorMessage } = require('./blacklist');
 const { playSoundAlert, isInVoiceChannel, speakTTS } = require('./voice');
 const { checkGoalProgress } = require('./goals');
+const { generateThankYouMessage, getTier } = require('./thankyou');
 const { DISCORD_CHANNEL_ID, ENABLE_SOUND_ALERT, ENABLE_TTS, TOP_DONATOR_ROLE_ID, GUILD_ID, MIN_ALERT_AMOUNT, MIN_TTS_AMOUNT } = require('../config');
 
 let discordClient = null;
@@ -151,17 +152,32 @@ async function handleDonation(data, isTest = false) {
         // Check milestone
         const milestone = getMilestone(donation.amount);
         
+        // Generate thank you message
+        const thankYouMsg = generateThankYouMessage(
+            { donator: donation.donorName, amount: donation.amount, message: donation.message },
+            !!milestone
+        );
+        
+        // Get tier for color
+        const tier = milestone ? 'milestone' : getTier(donation.amount);
+        const tierColors = {
+            small: 0x00FF00,
+            medium: 0xFFD700,
+            large: 0xFF6B35,
+            milestone: 0xFF00FF
+        };
+        
         // Buat embed notifikasi
         const embed = new EmbedBuilder()
-            .setColor(milestone ? 0xFFD700 : 0xFF6B35)
+            .setColor(tierColors[tier] || 0xFF6B35)
             .setTitle(milestone ? `${milestone.emoji} ${milestone.title}` : '🎉 Donasi Baru!')
-            .setDescription(`**${donation.donorName}** telah berdonasi!`)
+            .setDescription(thankYouMsg)
             .addFields(
                 { name: '💵 Jumlah', value: formatRupiah(donation.amount), inline: true },
                 { name: '📅 Waktu', value: `<t:${Math.floor(donation.timestamp.getTime() / 1000)}:R>`, inline: true },
             )
             .setThumbnail('https://saweria.co/favicon.ico')
-            .setFooter({ text: isTest ? '⚠️ INI ADALAH TEST DONASI' : 'Terima kasih atas dukungannya! 💖' })
+            .setFooter({ text: isTest ? '⚠️ INI ADALAH TEST DONASI' : `Tier: ${tier.charAt(0).toUpperCase() + tier.slice(1)} 💖` })
             .setTimestamp();
 
         // Tambahkan pesan donatur jika ada (dengan filter blacklist)

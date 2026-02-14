@@ -31,12 +31,27 @@ Bot Discord untuk integrasi dengan [Saweria](https://saweria.co) - platform dona
 - Default blacklist + custom words
 - Admin dapat menambah/hapus kata
 
-### � Minimum Amount Alert
+### 💰 Minimum Amount Alert
 - Set minimum donasi untuk notifikasi Discord
 - Set minimum donasi untuk TTS
 - Donasi di bawah minimum tetap tercatat di database
 
-### �💾 Database
+### 📊 Analytics Dashboard
+- Dashboard overview statistik donasi
+- Grafik donasi per jam (7 hari terakhir)
+- Grafik donasi per hari (30 hari terakhir)
+- Tren bulanan (6 bulan terakhir)
+- Peak hour & peak day analysis
+- Perbandingan bulan ini vs bulan lalu
+
+### 💌 Custom Thank You Messages
+- Pesan terima kasih yang dapat dikustomisasi
+- 4 tier: Small, Medium, Large, Milestone
+- Template variables: {name}, {amount}, {message}, {date}, {time}
+- Warna berbeda untuk setiap tier
+- Preview template sebelum digunakan
+
+### 💾 Database
 - SQLite untuk penyimpanan persisten
 - Semua donasi tercatat di database
 
@@ -50,6 +65,7 @@ Bot Discord untuk integrasi dengan [Saweria](https://saweria.co) - platform dona
 | `/totaldonasi` | Tampilkan statistik donasi |
 | `/summary [periode]` | Rangkuman donasi (harian/mingguan/semua) |
 | `/goal` | Tampilkan progress donation goal |
+| `/analytics [view]` | Lihat analytics (dashboard/hourly/daily/monthly) |
 | `/donasi` | Informasi cara berdonasi |
 | `/donasihelp` | Bantuan semua perintah |
 
@@ -69,6 +85,11 @@ Bot Discord untuk integrasi dengan [Saweria](https://saweria.co) - platform dona
 | `/minalert set <jumlah>` | Set minimum amount untuk notifikasi |
 | `/minalert tts <jumlah>` | Set minimum amount untuk TTS |
 | `/minalert status` | Lihat setting minimum amount |
+| `/thankyou settings` | Lihat template terima kasih |
+| `/thankyou set <tier> <template>` | Ubah template untuk tier |
+| `/thankyou tier <tier> <jumlah>` | Ubah threshold tier |
+| `/thankyou reset` | Reset semua template ke default |
+| `/thankyou preview <tier>` | Preview pesan terima kasih |
 
 ## 🚀 Instalasi
 
@@ -185,10 +206,12 @@ Saweria/
     │   └── commandHandler.js # Handler interaksi
     │
     ├── modules/
+    │   ├── analytics.js     # Analytics & statistik
     │   ├── blacklist.js     # Filter kata terlarang
     │   ├── donation.js      # Pemrosesan donasi
     │   ├── goals.js         # Donation goals
     │   ├── summary.js       # Rangkuman donasi
+    │   ├── thankyou.js      # Custom thank you messages
     │   └── voice.js         # Voice & TTS
     │
     ├── services/

@@ -20,6 +20,20 @@ const { joinVoice, leaveVoice } = require('../modules/voice');
 const { setupAutoSummary, getStatsByPeriod } = require('../modules/summary');
 const { setGoal, getGoalProgress, resetGoal } = require('../modules/goals');
 const { handleDonation, setMinAlertAmount, setMinTTSAmount, getMinAmounts } = require('../modules/donation');
+const { 
+    generateAnalyticsEmbed,
+    generateHourlyChartEmbed,
+    generateDailyChartEmbed,
+    generateMonthlyTrendEmbed 
+} = require('../modules/analytics');
+const { 
+    setTemplate,
+    setTierThreshold,
+    resetTemplates,
+    generateThankYouMessage,
+    generateSettingsEmbed,
+    getTier 
+} = require('../modules/thankyou');
 
 /**
  * Handle semua slash command interactions
@@ -91,6 +105,14 @@ async function handleCommand(interaction, client) {
             
             case 'minalert':
                 await handleMinAlert(interaction);
+                break;
+            
+            case 'analytics':
+                await handleAnalytics(interaction);
+                break;
+            
+            case 'thankyou':
+                await handleThankYou(interaction);
                 break;
         }
     } catch (error) {
@@ -555,6 +577,124 @@ async function handleMinAlert(interaction) {
             )
             .setDescription('Donasi di bawah minimum tetap tercatat di database.')
             .setFooter({ text: 'Gunakan /minalert set atau /minalert tts untuk mengubah' })
+            .setTimestamp();
+        
+        await interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+}
+
+// ==================== ANALYTICS HANDLER ====================
+
+async function handleAnalytics(interaction) {
+    const view = interaction.options.getString('view') || 'dashboard';
+    
+    let embed;
+    
+    switch (view) {
+        case 'hourly':
+            embed = generateHourlyChartEmbed();
+            break;
+        case 'daily':
+            embed = generateDailyChartEmbed();
+            break;
+        case 'monthly':
+            embed = generateMonthlyTrendEmbed();
+            break;
+        case 'dashboard':
+        default:
+            embed = generateAnalyticsEmbed();
+            break;
+    }
+    
+    await interaction.reply({ embeds: [embed] });
+}
+
+// ==================== THANK YOU HANDLER ====================
+
+async function handleThankYou(interaction) {
+    const subcommand = interaction.options.getSubcommand();
+    
+    if (subcommand === 'settings') {
+        const embed = generateSettingsEmbed();
+        await interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+    
+    else if (subcommand === 'set') {
+        const tier = interaction.options.getString('tier');
+        const template = interaction.options.getString('template');
+        
+        setTemplate(tier, template);
+        
+        const embed = new EmbedBuilder()
+            .setColor(0x00FF00)
+            .setTitle('✅ Template Updated')
+            .setDescription(`Template untuk tier **${tier}** berhasil diubah!`)
+            .addFields({ name: '📝 Template Baru', value: `\`\`\`${template}\`\`\`` })
+            .setTimestamp();
+        
+        await interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+    
+    else if (subcommand === 'tier') {
+        const tier = interaction.options.getString('tier');
+        const jumlah = interaction.options.getInteger('jumlah');
+        
+        setTierThreshold(tier, jumlah);
+        
+        const embed = new EmbedBuilder()
+            .setColor(0x00FF00)
+            .setTitle('✅ Tier Threshold Updated')
+            .setDescription(`Threshold untuk tier **${tier}** diubah menjadi **${formatRupiah(jumlah)}**`)
+            .setTimestamp();
+        
+        await interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+    
+    else if (subcommand === 'reset') {
+        resetTemplates();
+        
+        const embed = new EmbedBuilder()
+            .setColor(0xFFD700)
+            .setTitle('🔄 Templates Reset')
+            .setDescription('Semua template terima kasih telah di-reset ke default.')
+            .setTimestamp();
+        
+        await interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+    
+    else if (subcommand === 'preview') {
+        const tier = interaction.options.getString('tier');
+        
+        // Create sample donation for preview
+        const sampleDonation = {
+            donator: 'SampleDonatur',
+            amount: tier === 'small' ? 10000 : tier === 'medium' ? 75000 : 150000,
+            message: 'Ini adalah contoh pesan donasi!'
+        };
+        
+        const isMilestone = tier === 'milestone';
+        const message = generateThankYouMessage(sampleDonation, isMilestone);
+        
+        // Color based on tier
+        const colors = {
+            small: 0x00FF00,
+            medium: 0xFFD700,
+            large: 0xFF6B35,
+            milestone: 0xFF00FF
+        };
+        
+        const embed = new EmbedBuilder()
+            .setColor(colors[tier] || 0x00FF00)
+            .setTitle(`🔍 Preview: ${tier.charAt(0).toUpperCase() + tier.slice(1)}`)
+            .setDescription(message)
+            .addFields(
+                { name: '📝 Sample Data', value: 
+                    `**Nama:** ${sampleDonation.donator}\n` +
+                    `**Amount:** ${formatRupiah(sampleDonation.amount)}\n` +
+                    `**Pesan:** ${sampleDonation.message}`
+                }
+            )
+            .setFooter({ text: 'Ini adalah preview - bukan donasi asli' })
             .setTimestamp();
         
         await interaction.reply({ embeds: [embed], ephemeral: true });

@@ -209,6 +209,95 @@ const commands = [
                 .setName('status')
                 .setDescription('Lihat setting minimum amount saat ini')
         ),
+    
+    // ==================== ANALYTICS COMMANDS ====================
+    new SlashCommandBuilder()
+        .setName('analytics')
+        .setDescription('Lihat analytics dan statistik donasi')
+        .addStringOption(option =>
+            option.setName('view')
+                .setDescription('Jenis analytics')
+                .setRequired(false)
+                .addChoices(
+                    { name: '📊 Dashboard (Overview)', value: 'dashboard' },
+                    { name: '⏰ Per Jam', value: 'hourly' },
+                    { name: '📅 Per Hari', value: 'daily' },
+                    { name: '📈 Tren Bulanan', value: 'monthly' }
+                )
+        ),
+    
+    // ==================== THANK YOU COMMANDS ====================
+    new SlashCommandBuilder()
+        .setName('thankyou')
+        .setDescription('Kelola pesan terima kasih (Admin only)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('settings')
+                .setDescription('Lihat settings template terima kasih')
+        )
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('set')
+                .setDescription('Set template pesan untuk tier tertentu')
+                .addStringOption(option =>
+                    option.setName('tier')
+                        .setDescription('Tier donasi')
+                        .setRequired(true)
+                        .addChoices(
+                            { name: '🟢 Small', value: 'small' },
+                            { name: '🟡 Medium', value: 'medium' },
+                            { name: '🟠 Large', value: 'large' },
+                            { name: '🎆 Milestone', value: 'milestone' }
+                        )
+                )
+                .addStringOption(option =>
+                    option.setName('template')
+                        .setDescription('Template pesan. Gunakan {name}, {amount}, {message}, {date}, {time}')
+                        .setRequired(true)
+                )
+        )
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('tier')
+                .setDescription('Set threshold untuk tier')
+                .addStringOption(option =>
+                    option.setName('tier')
+                        .setDescription('Tier yang ingin diubah')
+                        .setRequired(true)
+                        .addChoices(
+                            { name: '🟡 Medium', value: 'medium' },
+                            { name: '🟠 Large', value: 'large' }
+                        )
+                )
+                .addIntegerOption(option =>
+                    option.setName('jumlah')
+                        .setDescription('Threshold amount (Rupiah)')
+                        .setRequired(true)
+                        .setMinValue(1000)
+                )
+        )
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('reset')
+                .setDescription('Reset semua template ke default')
+        )
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('preview')
+                .setDescription('Preview pesan terima kasih')
+                .addStringOption(option =>
+                    option.setName('tier')
+                        .setDescription('Tier yang ingin di-preview')
+                        .setRequired(true)
+                        .addChoices(
+                            { name: '🟢 Small', value: 'small' },
+                            { name: '🟡 Medium', value: 'medium' },
+                            { name: '🟠 Large', value: 'large' },
+                            { name: '🎆 Milestone', value: 'milestone' }
+                        )
+                )
+        ),
 ];
 
 module.exports = commands;

@@ -120,6 +120,66 @@ const dbHelpers = {
     removeBlacklistWord: db.prepare(`DELETE FROM blacklist WHERE word = ?`),
     getBlacklistWords: db.prepare(`SELECT word FROM blacklist`),
     isWordBlacklisted: db.prepare(`SELECT 1 FROM blacklist WHERE word = ?`),
+    
+    // Analytics operations
+    getHourlyStats: db.prepare(`
+        SELECT 
+            strftime('%H', timestamp) as hour,
+            COUNT(*) as count,
+            COALESCE(SUM(amount), 0) as total
+        FROM donations
+        WHERE timestamp >= datetime('now', '-7 days')
+        GROUP BY hour
+        ORDER BY hour
+    `),
+    
+    getDailyOfWeekStats: db.prepare(`
+        SELECT 
+            strftime('%w', timestamp) as day_of_week,
+            COUNT(*) as count,
+            COALESCE(SUM(amount), 0) as total
+        FROM donations
+        WHERE timestamp >= datetime('now', '-30 days')
+        GROUP BY day_of_week
+        ORDER BY day_of_week
+    `),
+    
+    getAverageStats: db.prepare(`
+        SELECT 
+            COALESCE(AVG(amount), 0) as average_amount,
+            COALESCE(MAX(amount), 0) as max_amount,
+            COALESCE(MIN(amount), 0) as min_amount
+        FROM donations
+    `),
+    
+    getMonthlyTrend: db.prepare(`
+        SELECT 
+            strftime('%Y-%m', timestamp) as month,
+            COUNT(*) as count,
+            COALESCE(SUM(amount), 0) as total
+        FROM donations
+        GROUP BY month
+        ORDER BY month DESC
+        LIMIT 6
+    `),
+    
+    getThisMonthStats: db.prepare(`
+        SELECT 
+            COALESCE(SUM(amount), 0) as total_amount,
+            COUNT(DISTINCT donor_name) as total_donors,
+            COUNT(*) as total_transactions
+        FROM donations
+        WHERE strftime('%Y-%m', timestamp) = strftime('%Y-%m', 'now')
+    `),
+    
+    getLastMonthStats: db.prepare(`
+        SELECT 
+            COALESCE(SUM(amount), 0) as total_amount,
+            COUNT(DISTINCT donor_name) as total_donors,
+            COUNT(*) as total_transactions
+        FROM donations
+        WHERE strftime('%Y-%m', timestamp) = strftime('%Y-%m', 'now', '-1 month')
+    `),
 };
 
 // Close database function
